@@ -88,10 +88,16 @@ def play_game(pid, game_type):
             continue
         
         r2 = api('mover', {'partidaId': pid, 'jugada': move})
-        fin = r2.get('payload', {}).get('fin')
+        payload = r2.get('payload', {})
+        fin = payload.get('fin') if isinstance(payload, dict) else None
         if fin:
-            gold = r2['payload'].get('miGold', '?')
-            premio = fin.get('premio', 0)
+            gold = payload.get('miGold', '?') if isinstance(payload, dict) else '?'
+            if isinstance(fin, dict):
+                premio = fin.get('premio', 0)
+            elif isinstance(fin, str):
+                premio = 0
+            else:
+                premio = 0
             print(f"  Game {pid} ENDED: premio={premio} gold={gold}")
             return premio
         
