@@ -1,17 +1,23 @@
 #!/bin/bash
 # urkocoin auto-farmer — spins wheel, claims dust, converts GOLD→URKO, auto-withdraws
-# Usage: bash farm.sh (reads .env for credentials)
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="${SCRIPT_DIR}/farm.log"
 
-# Load credentials from .env
 if [ ! -f "${SCRIPT_DIR}/.env" ]; then
-    echo "$(date): ERROR: .env not found! Copy .env.example → .env and fill in credentials." >> "$LOG"
+    echo "$(date): ERROR: .env not found" >> "$LOG"
     exit 1
 fi
-source "${SCRIPT_DIR}/.env"
+
+# Read .env safely (handles special chars in values)
+while IFS='=' read -r key value; do
+    case "$key" in
+        URKO_COIN_INITDATA) export URKO_COIN_INITDATA="$value" ;;
+        URKO_WALLET)        export URKO_WALLET="$value" ;;
+        URKO_SCHAIN)        export URKO_SCHAIN="$value" ;;
+    esac
+done < "${SCRIPT_DIR}/.env"
 
 LP="${URKO_COIN_INITDATA}"
 WALLET="${URKO_WALLET:-4uyH55BVHaLKC9qX29jLEo7RqPZ6EwYemFfpjpaf4kuA}"
@@ -33,7 +39,15 @@ for i in 1 2 3 4 5; do
     if echo "$RESP" | grep -q "spin limit reached"; then
         break
     fi
-    PRIZE=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); p=d.get('payload',{}); print(f'{p.get(\"prize\",\"?\")} +{p.get(\"amount\",0)}')" 2>/dev/null || echo "parse error")
+    # Extract prize info
+    PRIZE=$(echo "$RESP" | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    p=d.get('payload',{})
+    print(f'{p.get(\"prize\",\"?\")} +{p.get(\"amount\",0)}')
+except: print('parse error')
+" 2>/dev/null || echo "parse error")
     echo "$(date): Spin $i: $PRIZE" >> "$LOG"
     sleep 4
 done
@@ -46,8 +60,16 @@ fi
 
 # 3. Check balance
 BAL=$(api "deposit/mios")
-GOLD=$(echo "$BAL" | python3 -c "import sys,json; print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('gold',0))" 2>/dev/null || echo 0)
-URKO=$(echo "$BAL" | python3 -c "import sys,json; print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('urko',0))" 2>/dev/null || echo 0)
+GOLD=$(echo "$BAL" | python3 -c "
+import sys,json
+try: print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('gold',0))
+except: print(0)
+" 2>/dev/null || echo 0)
+URKO=$(echo "$BAL" | python3 -c "
+import sys,json
+try: print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('urko',0))
+except: print(0)
+" 2>/dev/null || echo 0)
 echo "$(date): Balance: GOLD=$GOLD | URKO=$URKO" >> "$LOG"
 
 # 4. Convert GOLD → URKO (500:1)
@@ -57,7 +79,11 @@ if [ "$GOLD" -gt 500 ] 2>/dev/null; then
     echo "$(date): Swapped $GOLD GOLD → $AMT URKO" >> "$LOG"
     
     BAL2=$(api "deposit/mios")
-    URKO=$(echo "$BAL2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('urko',0))" 2>/dev/null || echo 0)
+    URKO=$(echo "$BAL2" | python3 -c "
+import sys,json
+try: print(json.load(sys.stdin).get('payload',{}).get('balances',{}).get('urko',0))
+except: print(0)
+" 2>/dev/null || echo 0)
 fi
 
 # 5. Auto-withdraw if ≥ 10,000 URKO (leave 2,500 fee buffer)
