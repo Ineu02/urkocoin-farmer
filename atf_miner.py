@@ -81,6 +81,76 @@ def solve_math(question):
         return {'+': a+b, '-': a-b, '*': a*b, '/': a//b}.get(op, 0)
     return 0
 
+# --- Puzzle solver --- (inline, no external import needed)
+def solve_puzzle(board_svg):
+    """Extract slot X position from SVG translate() in dashed group"""
+    dash_idx = board_svg.find('stroke-dasharray')
+    if dash_idx == -1:
+        return None
+    group = board_svg[max(0, dash_idx-200):dash_idx+500]
+    m = re.search(r'translate\(([\d.]+)\s+([\d.]+)\)', group)
+    return float(m.group(1)) if m else None
+
+def build_motion(start_x, target, duration_ms, steps=25):
+    """Build natural-looking motion with ease-in-out + jitter"""
+    import random
+    motion = []
+    for i in range(steps + 1):
+        ratio = i / steps
+        ease = ratio * ratio * (3 - 2 * ratio)
+        x = start_x + (target - start_x) * ease
+        t = duration_ms * ratio
+        motion.append({"x": round(x + random.uniform(-0.3, 0.3), 2), "t": round(t, 1)})
+    return motion
+
+def withdraw_atf(session, init_data, tma, tg_id, balance):
+    """Auto-withdraw: solve puzzle → submit withdrawal"""
+    global running
+    if balance < 500:
+        logger.info(f"💰 Need 500 ATF to withdraw (have {balance:.2f})")
+        return False
+    
+    logger.info(f"🏦 WITHDRAWING {balance} ATF...")
+    
+    # Get puzzle
+    puzzle = api_call(session, 'get_withdraw_puzzle', init_data, tma, tg_id, {})
+    if puzzle.get('status') != 'success':
+        logger.error(f"Puzzle failed: {puzzle.get('message', '')}")
+        return False
+    
+    # Solve
+    slot_x = solve_puzzle(puzzle['board']['svg'])
+    if slot_x is None:
+        logger.error("Could not solve puzzle SVG")
+        return False
+    
+    start_x = puzzle['slider']['start_x']
+    max_x = puzzle['slider']['max_x']
+    min_ms = int(puzzle.get('min_solve_ms', 1000))
+    cid = puzzle['challenge_id']
+    
+    if slot_x < start_x or slot_x > max_x:
+        logger.error(f"Slot X {slot_x} out of range [{start_x}, {max_x}]")
+        return False
+    
+    duration = min_ms + 500
+    motion = build_motion(start_x, slot_x, duration)
+    
+    result = api_call(session, 'withdraw', init_data, tma, tg_id, {
+        'amount': balance,
+        'withdraw_puzzle_id': cid,
+        'withdraw_puzzle_offset': round(slot_x, 2),
+        'withdraw_puzzle_duration_ms': duration,
+        'withdraw_puzzle_motion': motion
+    })
+    
+    if result.get('status') == 'success':
+        logger.info(f"🎉 WITHDRAWN {balance} ATF! {result.get('message', '')}")
+        return True
+    else:
+        logger.error(f"Withdraw failed: {result.get('reason', '')} — {result.get('message', '')}")
+        return False
+
 # --- Main loop ---
 def run():
     global running
@@ -193,6 +263,10 @@ def run():
                         else:
                             logger.debug(f"Claim skip: pending={pr}")
                     last_claim = now
+                
+                # Auto-withdraw when we hit 500 ATF
+                if balance >= 500:
+                    withdraw_atf(session, init_data, tma, tg_id, balance)
                 
                 # Status every 5 minutes
                 if cycle_count > 0 and cycle_count % 20 == 0:
