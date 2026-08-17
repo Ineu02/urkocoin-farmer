@@ -1,14 +1,17 @@
 #!/bin/bash
-# Combined: refresh token + farm — used by cron
+# Combined: refresh + farm + tap + games
 set -eo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT="/root/urkocoin-farmer"
+LOG="${PROJECT}/farm.log"
 
-# 1. Refresh initData
-python3 "${DIR}/refresh_token.py" >> "${DIR}/farm.log" 2>&1
-if [ $? -ne 0 ]; then
-    echo "$(date): TOKEN REFRESH FAILED" >> "${DIR}/farm.log"
-    exit 1
-fi
+# 1. Refresh token
+python3 "${PROJECT}/refresh_token.py" >> "${LOG}" 2>&1
 
-# 2. Run farm
-bash "${DIR}/farm.sh"
+# 2. Auto-tap (WebSocket clicks)
+python3.12 "${PROJECT}/auto_tap.py" >> "${LOG}" 2>&1
+
+# 3. Farm (spin + dust + swap)
+bash "${PROJECT}/farm.sh" >> "${LOG}" 2>&1
+
+# 4. Play active games
+python3.12 "${PROJECT}/game_player.py" >> "${LOG}" 2>&1
