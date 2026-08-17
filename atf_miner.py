@@ -160,14 +160,14 @@ def run():
                         boost_exploits += 1
                     elif status == 'penalty':
                         # Penalty active - wait and retry
-                        remaining = boost.get('remaining', 0)
+                        remaining = int(boost.get('remaining', 0))
                         if remaining > 0:
                             logger.info(f"⏳ Boost locked for {remaining}s (penalty)")
                             last_boost = now + remaining - 5  # retry 5s before penalty ends
                         else:
                             last_boost = now + 60
                     elif status == 'cooldown':
-                        cd = boost.get('cooldown_remaining', 10)
+                        cd = int(boost.get('cooldown_remaining', 10))
                         logger.debug(f"Boost cooldown: {cd}s")
                         last_boost = now + cd
                     else:
@@ -180,7 +180,7 @@ def run():
                     if login2.get('status') == 'success':
                         tma = login2.get('tma_session_token', tma)
                         pr = login2.get('user', {}).get('pending_reward', 0)
-                        if pr > 0.00001:
+                        if float(pr) > 0.00001:
                             claim = api_call(session, 'claim', init_data, tma, tg_id,
                                            {'claim_preview': float(pr)})
                             if claim.get('status') == 'success':
